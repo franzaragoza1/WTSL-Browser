@@ -10,13 +10,18 @@ import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objects as go
 from urllib.parse import quote_plus, parse_qs, unquote_plus
+import os # Añadido para la ruta del JSON en Render
 
 # ------------------ DATA LOADING ------------------
-with open("data.json", "r", encoding="utf-8") as f:
-    data = json.load(f)
-df = pd.DataFrame(data).drop_duplicates(subset=["name"]).reset_index(drop=True)
+# Arregla la ruta para que Render encuentre el JSON
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(BASE_DIR, "data.json")
 
-# *** CAMBIO DE DATOS: "Unknown" ahora es "Left" (Zurdo) ***
+with open(DATA_PATH, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+# Corregimos los datos: "Unknown" ahora es "Left" (Zurdo)
+df = pd.DataFrame(data).drop_duplicates(subset=["name"]).reset_index(drop=True)
 df["hand"] = df["hand"].fillna("Unknown").replace({
     "L": "Left", "R": "Right",
     "U": "Left", # U (Unknown) -> Left
@@ -96,10 +101,11 @@ def talent_to_stars(val, max_one=False):
 
 
 # ------------------ APP ------------------
-# *** CAMBIO DE DISEÑO: Quitamos QUARTZ y usamos CSS personalizado ***
-# Usamos BOOTSTRAP solo como base para la estructura de componentes
+# Usamos BOOTSTRAP solo como base para la estructura
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 app.title = "WTSL Stats"
+server = app.server # Añadido para que Gunicorn (Render) funcione
+
 
 # ------------------ LAYOUT ------------------
 app.layout = dbc.Container(fluid=True, className="p-4", children=[
@@ -110,7 +116,7 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
         dbc.Col(
             dbc.Card(
                 dbc.CardBody([
-                    html.H3("🎾 WTSL Stats", className="text-center mb-3"), # Título usará color acento
+                    html.H3("🎾 WTSL Stats", className="text-center mb-3"),
                     html.Hr(),
 
                     html.Label("Search Player:", className="fw-bold"),
@@ -140,7 +146,6 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
                     html.Div(id="player-list", style={
                         "maxHeight": "400px", "overflowY": "scroll", "borderRadius": "6px",
                         "padding": "8px"
-                        # Estilo de fondo movido al CSS
                     }),
                 ]),
             ),
@@ -151,7 +156,7 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
         dbc.Col(
             dbc.Card(
                 dbc.CardBody([
-                    # *** CORRECCIÓN: Cambiado a dbc.Tabs ***
+                    # CORRECCIÓN: Usamos dbc.Tabs en lugar de dcc.Tabs
                     dbc.Tabs(
                         [
                             dbc.Tab(label="Overview", tab_id="overview"),
@@ -164,10 +169,9 @@ app.layout = dbc.Container(fluid=True, className="p-4", children=[
                             dbc.Tab(label="Compare", tab_id="compare"),
                         ],
                         id="tabs",
-                        active_tab="overview", # Cambiado de 'value' a 'active_tab'
+                        active_tab="overview", # Propiedad correcta es 'active_tab'
                         className="mb-3",
                     ),
-                    # El Div para el contenido sigue igual
                     html.Div(id="tab-content")
                 ])
             ),
@@ -208,13 +212,12 @@ def update_player_list(search, style, hand, min_speed):
             html.A(
                 row["name"],
                 href=url,
-                # *** CAMBIO DE DISEÑO: Usamos una clase CSS personalizada ***
                 className="player-list-link"
             )
         )
     return links
 
-# *** CAMBIO DE DISEÑO: CSS personalizado con la nueva paleta ***
+# CSS personalizado con la nueva paleta y corrección de pestañas
 app.index_string = """
 <!DOCTYPE html>
 <html>
@@ -303,7 +306,7 @@ app.index_string = """
                 background-color: var(--c3-rain);
             }
 
-            /* *** CORRECCIÓN DEFINITIVA PARA PESTAÑAS (dbc.Tabs) *** */
+            /* CORRECCIÓN PESTAÑAS (dbc.Tabs) */
             .nav-tabs {
                 border-bottom: 1px solid var(--c3-rain);
             }
@@ -327,7 +330,6 @@ app.index_string = """
                 border-color: var(--c4-greenery);
                 font-weight: 600;
             }
-            /* *** FIN DE LA CORRECCIÓN *** */
 
             .text-muted {
                 color: var(--c3-rain) !important;
@@ -371,7 +373,7 @@ app.index_string = """
 # Main content area
 @app.callback(
     Output("tab-content", "children"),
-    Input("tabs", "active_tab"), # *** CORRECCIÓN: 'value' -> 'active_tab' ***
+    Input("tabs", "active_tab"), # CORRECCIÓN: 'value' -> 'active_tab'
     Input("url", "search")
 )
 def render_tabs(tab, search):
@@ -389,7 +391,6 @@ def render_tabs(tab, search):
         return html.Div(f"Player '{player_name}' not found.", className="text-danger p-3")
     p = matches.iloc[0]
 
-    # *** CAMBIO DE DISEÑO: Usamos "plotly_dark" y el nuevo color acento ***
     graph_template = "plotly_dark"
     accent_color = "#6FB98F" # c4-greenery
 
@@ -400,7 +401,6 @@ def render_tabs(tab, search):
         
         radar = px.line_polar(radar_df, r="Value", theta="Attribute", line_close=True, template=graph_template)
         radar.update_traces(fill="toself", line_color=accent_color)
-        # Hacemos el fondo del gráfico transparente para que coja el color de la tarjeta
         radar.update_layout(polar=dict(radialaxis=dict(range=[0, 100], showticklabels=False)),
                             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)") 
 
@@ -417,7 +417,6 @@ def render_tabs(tab, search):
             rows.append(html.Tr([html.Td(LABELS[key]), html.Td(p.get(key, "—"))]))
         return html.Div([
             html.H4(f"{p['name']} — {section}"),
-            # *** CAMBIO DE DISEÑO: Quitamos color="dark", el CSS lo maneja ***
             dbc.Table(rows, bordered=True, striped=True, hover=True, className="mt-2")
         ])
 
@@ -475,7 +474,7 @@ def compare_players(a, b):
     radar.update_traces(fill="toself", opacity=0.7)
     radar.update_layout(polar=dict(radialaxis=dict(range=[0, 100], showticklabels=False)),
                         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                        legend_title_text="") # Quitar título de leyenda
+                        legend_title_text="") 
 
     table_rows = []
     for attr in radar_attrs:
@@ -488,7 +487,6 @@ def compare_players(a, b):
     table = dbc.Table(
         [html.Thead(html.Tr([html.Th("Attribute"), html.Th(a), html.Th(b)]))] + table_rows,
         bordered=True, striped=True, hover=True, className="mt-3"
-        # *** CAMBIO DE DISEÑO: Quitamos color="dark" ***
     )
 
     return html.Div([dcc.Graph(figure=radar), table])
